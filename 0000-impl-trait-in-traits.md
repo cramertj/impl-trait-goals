@@ -353,7 +353,7 @@ This prevents users from having to switch back and forth between providing and
 not providing associated types based on whether or not their return type uses
 `impl Trait`.
 
-## Detailed Design: Interaction with Associated Type Constructors
+### Return Position: Interaction with Associated Type Constructors
 [detailed_atcs]: #detailed_atcs
 
 Associated type constructors, often referred to as ATCs, allow users to specify
