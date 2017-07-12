@@ -369,7 +369,7 @@ In any of the above obligations, a more specific `impl Trait` type can be
 substituted for a concrete type, and that will still create a new obligation.
 For example:
 
-```
+```rust
 type Foo = impl Debug;
 
 fn foo() -> Foo {
