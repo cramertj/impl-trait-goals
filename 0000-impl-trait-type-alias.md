@@ -426,7 +426,7 @@ We could instead expand `impl Trait` in a more focused but limited way,
 such as specifically extending `impl Trait` to work in traits without
 allowing full "`impl Trait` type alias".
 A draft RFC for such a proposal can be seen
-[here]().
+[here](https://github.com/cramertj/impl-trait-goals/blob/impl-trait-in-traits/0000-impl-trait-in-traits.md).
 
 # Unresolved questions
 [unresolved]: #unresolved-questions
