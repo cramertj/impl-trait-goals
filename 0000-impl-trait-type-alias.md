@@ -7,8 +7,7 @@
 [summary]: #summary
 
 Add the ability to create type aliases for `impl Trait` types,
-support `impl Trait` in `let`, `const`, and `static` declarations,
-and allow module-local ascription of types to `impl Trait` expressions:
+and support `impl Trait` in `let`, `const`, and `static` declarations.
 
 ```rust
 // `impl Trait` type alias:
@@ -36,37 +35,12 @@ fn my_func() {
     let iter: impl Iterator<Item = i32> = (0..5).map(|x| x * 5);
     ...
 }
-
-
-// Module-local ascription of types to `impl Trait` expressions:
-mod foo {
-    pub const X: impl Debug = 5i32;
-
-    pub fn fn_in_foo() {
-        println!("{:?}", X); // `foo::X` is of type `impl Debug`
-
-        // Because `X` is declared  as `impl Debug` within the same module,
-        // we can assert that `X` is actually of type `i32`:
-        let x: i32 = X;
-        println!("{:?}", x + 5);
-    }
-}
-
-fn fn_outside_foo() {
-    // This works because `foo::X` is of type `impl Debug`:
-    println!("{:?}", foo::X);
-
-    // This fails because `X` is declared as `impl Debug` inside a different
-    // module.
-    let x: i32 = X; // ERROR: expected type `i32`, found type `impl Debug`
-    println!("{:?}", x + 5);
-}
 ```
 
 # Motivation
 [motivation]: #motivation
 
-This RFC proposes three expansions to Rust's `impl Trait` feature.
+This RFC proposes two expansions to Rust's `impl Trait` feature.
 `impl Trait`, first introduced in [RFC 1522][1522], allows functions to return
 types which implement a given trait, but whose concrete type remains anonymous.
 `impl Trait` was expanded upon in [RFC 1951][1951], which added `impl Trait` to
@@ -133,291 +107,290 @@ fn one_of_the_foos(which: usize) -> Foo {
 }
 ```
 
-Separately, this RFC makes it possible to store an `impl Trait` type in a
+Separately, this RFC adds the ability to store an `impl Trait` type in a
 `let`, `const` or `static`.
-This makes it possible to store types such as closures
-or iterator combinators in `const`s and `static`s, and also makes it possible
-to write more concise type declarations for `const`s and `static`s.
+This makes `const` and `static` declarations more concise,
+and makes it possible to store types such as closures or iterator combinators
+in `const`s and `static`s.
 Writing out the full type of `const`s and `static`s has already been mentioned
 as a pain point in the [`const`/`static` type annotation elison RFC][2010].
-However, omitting the types of `const` and `static` items could make it harder
-to tell what sort of value is being stored in a `const` or `static`.
-Additionally, inferring the type of `const`s and `static`s is in conflict
-with Rust's current convention of requiring explicity-written types for
-module-level items.
-`impl Trait` `const`s and `static`s would help to alleviate frustration and
-enable use of unnameable types without requiring full omission of types:
-
-Finally, this RFC adds the ability to ascribe concrete types to module-local
-`impl Trait` values. This allows modules to hide their concrete types from the
-outer world with `impl Trait` without sacrificing expressiveness:
-
-```rust
-mod foo {
-    // The author of module `foo` wants to hide the concrete type of
-    // `SomeType` (`i32`):
-    type SomeType = impl Debug;
-    
-    pub fn foo() -> SomeType {
-        0i32
-    }
-
-    // Without this feature, `enlarge_foo` is impossible to write-- it must take
-    // `SomeType` as its argument to maintain the API boundary, but it can't
-    // do anything that requires knowing the concrete type of `SomeType`.
-    pub fn enlarge_foo(x: &mut SomeType) -> SomeType {
-        // In order to add to `x`, we have to assert that it is `&mut i32`.
-        // This requires that `SomeType` is `i32`.
-        let x: &mut i32 = x;
-        x + 5
-    }
-}
-
-fn outside() {
-    // Outside the module, we can call `foo` and `enlarge_foo`, but the only
-    // thing we know about `SomeType` is that it implements the `Debug` trait.
-    let mut x = foo();
-    enlarge_foo(&mut x);
-    println!("{:?}", x);
-}
-
-```
+That RFC proposes to let users omit the types of `const`s and `statics`s.
+However, in some cases, completely omitting the types of `const` and `static`
+items could make it harder to tell what sort of value is being stored in a
+`const` or `static`.
+Allowing `impl Trait` in `const`s and `static`s would resolve the unnameable
+type issue while still allowing users to provide some information about the
+type.
 
 [1522]: https://github.com/rust-lang/rfcs/blob/master/text/1522-conservative-impl-trait.md
 [1951]: https://github.com/rust-lang/rfcs/blob/master/text/1951-expand-impl-trait.md
 [2010]: https://github.com/rust-lang/rfcs/pull/2010
 
-# Detailed design
-[design]: #detailed-design
+# Guide-Level Explanation
+[guide]: #guide
 
-## `impl Trait` in `let`, `const`, and `static` Declarations
-[design-let-const-static]: #design-let-const-static
+## Guide: `impl Trait` in `let`, `const` and `static`:
+[guide-declarations]: #guide-declarations
 
-The idea of this feature is to simply allow specifying `impl Trait` in
-type declarations:
+`impl Trait` can be used in `let`, `const`, and `static` declarations,
+like this:
+```rust
+use std::fmt::Display;
+
+let displayable: impl Display = "Hello, world!";
+println!("{}", displayable);
+```
+
+Declaring a variable of type `impl Trait` will hide its concrete type.
+The value will only be usable as something that implements the trait.
+In our example above, this means that, while we can "display" the
+value of `displayable`, the concrete type `&str` is hidden from
+us:
 
 ```rust
-const ADD_ONE: impl Fn(usize) -> usize = |x| x + 1;
+use std::fmt::Display;
 
-static MAYBE_PRINT: Option<impl Fn(usize)> = Some(|x| println!("{}", x));
+// Without `impl Trait`:
+let displayable = "Hello, world!";
+println!("{}", displayable);
+assert_eq!(displayable.len(), 5); 
 
-fn my_func() {
-    let iter: impl Iterator<Item = i32> = (0..5).map(|x| x * 5);
-    ...
+// With `impl Trait`:
+let displayable: impl Display = "Hello, world!";
+let displayable = "Hello, world!";
+println!("{}", displayable);
+assert_eq!(displayable.len(), 5); // ERROR: no method `len` on `impl Display`
+```
+
+This is useful for declaring a value which implements a trait,
+but whose concrete type might change later on.
+
+`impl Trait` declarations are also useful when declaring constants or
+static with types that are impossible to name, like closures:
+
+```rust
+// Without `impl Trait`, we can't declare this constant because we can't
+// write down the type of the closure.
+const MY_CLOSURE: ??? = |x| x + 1;
+
+// With `impl Trait`:
+const MY_CLOSURE: impl Fn(i32) -> i32 = |x| x + 1;
+```
+
+## Guide: `impl Trait` Type Aliases
+[guide-aliases]: #guide-aliases
+
+`impl Trait` can also be used to create type aliases:
+
+```rust
+use std::fmt::Debug;
+
+type Foo = impl Debug;
+
+fn foo() -> Foo {
+    5i32
 }
 ```
 
-When an `impl Trait` type is declared in a `const`, or `static` binding,
-the type can only be used as something that implements `Trait`-- its concrete
-type is no longer known. This allows modules to declare `const`s and `static`s
-whose inner type is private. As we'll explain later, `let` bindings are handled
-differently, and their concrete type remains public within the item (function)
-in which they're written.
+`impl Trait` type aliases, just like regular type aliases, create
+synonyms for a type.
+In the example above, `Foo` is a synonym for `i32`.
+The difference between `impl Trait` type aliases and regular type aliases is
+that `impl Trait` type aliases hide their concrete type from other modules.
+Only the `impl Trait` signature is exposed:
 
-Since the type of `let` bindings can already be fully inferred, `impl Trait`
-doesn't add any additional expressiveness to `let` bindings.
-However, `const`s and `static`s current must have their full types manually
-specified.
-`const` and `static`s don't currently have any type inference, so we must add
-support for inferring the types of `impl Trait` consts/statics.
-In order to prevent the types of variables changing as a result of moving
-from a concrete bound to an `impl Trait` bound,
-no integer or float fallback will be applied when
-inferring the types of `const`s or `static`s.
+```rust
+use std::fmt::Debug;
 
-## `impl Trait` Type Aliases and Obligations
-[design-type-aliases]: #design-type-aliases
+mod my_mod {
+  pub type Foo = impl Debug;
 
-For the most part, an `impl Trait` type alias can be thought of as the same as
-any other type alias-- it introduces a new type name which is equivalent to
-some other type. The major differences are are that `impl Trait` type aliases
-hide the concrete type to which they refer, and their concrete type isn't
-specified at the declaration site (i.e. `type Foo = impl Debug;` alone gives no
-information about the concrete type of `Foo` other than that it implements the
-`Debug` trait). This second point introduces an issue: how to resolve the
-concrete type of `Foo`.
+  pub fn foo() -> Foo {
+      5i32
+  }
 
-Rust doesn't currently support module-level inference, and adding it would pose
-a significant implementation and compile-time burden. So `Foo`, which is a
-module-level item, can't be "inferred" in the traditional sense. Instead,
-the concrete type of `Foo` is determined from how `Foo` is used in the module
-in which it is declared. When a concrete type is used as `Foo`, or when an
-expression with type `Foo` is ascribed a type, an "obligation" is created.
+  pub fn use_foo_inside_mod() -> Foo {
+      // Creates a variable `x` of type `i32`, which is equal to type `Foo`
+      let x: i32 = foo();
+      x + 5
+  }
+}
+
+fn use_foo_outside_mod() {
+    // Creates a variable `x` of type `Foo`, which is equal to type `impl Debug`
+    let x = my_mod::foo();
+
+    // Because we're outside `my_mod`, using a value of type `Foo` as anything
+    // other than `impl Debug` is an error:
+    let y: i32 = foo(); // ERROR: expected type `i32`, found type `Foo`
+}
+```
+
+This makes it possible to write modules that hide their concrete types from the
+outside world, allowing them to change implementation details without affecting
+consumers of their API.
+
+Note that it is often necessary to manually specify the concrete type of an
+`impl Trait`-aliased value, like in `let x: i32 = foo();` above. This allows
+the concrete type of `x` to become visible, so that `x` can be used as an
+`i32` rather than just an `impl Debug`.
+
+One particularly noteworthy use of `impl Trait` type aliases is in trait
+implementations.
+With this feature, we can declare `impl Trait` associated types:
+
+```rust
+struct MyType;
+impl Iterator for MyType {
+    type Item = impl Debug;
+    fn next(&mut self) -> Option<Self::Item> {
+        Some("Another item!")
+    }
+}
+```
+
+In this trait implementation, we've declared that the item returned by our
+iterator implements `Debug`, but we've kept its concrete type (`&'static str`)
+hidden from the outside world.
+
+We can even use this feature to specify unnameable associated types, such as
+closures:
+
+```rust
+struct MyType;
+impl Iterator for MyType {
+    type Item = impl Fn(i32) -> i32;
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(|x| x + 5)
+    }
+}
+```
+
+# Reference-Level Explanation
+[reference]: #reference
+
+## Reference: `impl Trait` in `let`, `const` and `static`:
+[reference-declarations]: #reference-declarations
+
+The rules for `impl Trait` values in `let`, `const`, and `static` declarations
+work mostly the same as `impl Trait` return values as specified in
+[RFC 1951](https://github.com/rust-lang/rfcs/blob/master/text/1951-expand-impl-trait.md).
+
+These values hide their concrete type and can only be used as a value which
+is known to implement the specified traits. They inherit any type parameters
+in scope. One difference from `impl Trait` return types is that they also
+inherit any lifetime parameters in scope. This is necessary in order for
+`let` bindings to use `impl Trait`. `let` bindings often contain references
+which last for anonymous scope-based lifetimes, and annotating these lifetimes
+manually would be impossible.
+
+## Reference: `impl Trait` Type Aliases
+[reference-aliases]: #reference-aliases
+
+`impl Trait` type aliases are similar to normal type aliases, except that their
+concrete type is inferred from the module in which they are defined.
+For example, the following code has to examine the body of `foo` in order to
+determine that the concrete type of `Foo` is `i32`:
 
 ```rust
 type Foo = impl Debug;
 
 fn foo() -> Foo {
-    5i32 // Creates an obligation that `Foo` == `i32`
-}
-
-fn bar() {
-    // Ascription of `Foo` to `i32` creates an obligation:
-    let _: i32 = foo();
+    5i32
 }
 ```
 
-Obligations are visible to the item in which the obligation occurs. This
-means that, for example, a function which returns `i32` as a `Foo` can
-rely on other values of type `Foo` being of type `i32`:
+This introduces a certain amount of module-level type inference, since `Foo`
+can be used in multiple places throughout the module:
 
 ```rust
 type Foo = impl Debug;
 
-fn foo() -> Foo {
-    0i32
-}
-
-// Since `bar` returns `i32` as `Foo`, it knows that `Foo` must be `i32`,
-// so it can use all expressions of type `Foo` as though they were of type
-// `i32`.
-fn bar() -> Foo {
-    println!("{:?}", foo() + 5);
+fn foo1() -> Foo {
     5i32
 }
 
-fn baz() {
-    // Creates an obligation that `Foo` == `i32`:
-    let x: i32 = foo();
-    println!("{:?}", x + 5);
+fn foo2() -> Foo {
+    let x: i32 = foo1();
+    x + 5
 }
 
-// This function, however, creates no obligations on the type of `Foo`,
-// and so cannot see into the concrete type of `Foo`.
-fn bad1() {
-    println!("{:?}", foo() + 5); // ERROR
-}
-
-// This function passes function-local typechecking, but creates an
-// obligation `Foo` == `i64` which conflicts with the other obligations
-// in the module, resulting in an error.
-fn bad2() {
-    let _: i64 = foo();
-}
-
-// `const`s and `static`s can also create obligations:
-
-// Creates an obligation `Foo` == `i32`:
-const MY_FOO: Option<Foo> = Some(5i32);
-
-// Creates an obligation `Foo` == `i32`:
-static MY_FOO_2: Foo = 5i32;
-```
-
-Each function is fully typechecked using only the knowledge of its own
-local obligations. Once all of the obligations have been created, they
-are checked against each other for conflicts.
-
-## More on Obligations
-[design-more-obligations]: #design-more-obligations
-
-It's worth noting that obligations apply to more than just type-aliased
-`impl Trait` types. They apply to _all_ occurrences of `impl Trait`.
-When a non-aliased `impl Trait` is used, it is resolved just the same
-way. This allows for recursive `impl Trait` functions and other things
-not possible under the current `impl Trait` rules:
-
-```rust
-fn foo(x: usize) -> impl Debug {
-    match x {
-
-        // Returning a value of type `i32` creates an obligation
-        // `typeof(foo)::Return` == `i32`.
-        0 => 5i32,
-
-        // We can use that information in the rest of the function body:
-        _ => foo(x - 1) + 5,
-    }
-}
-
-fn bar(x: bool) -> impl Debug {
-    if x {
-        // Creates an obligation `bar::Return` == `&str`
-        "hello!"
-    } else {
-        // That obligation allows the type of `bar(true)` to unify with the type
-        // of `"hello!"`
-        bar(true)
-    }
+fn foo3() -> Foo {
+    foo1()
 }
 ```
 
-Without this logic, `foo` would fail because `foo(x - 1)` is only guaranteed to
-implement `Debug`, and so cannot be added to `5`.
+Without examining the bodies of each of `foo1`, `foo2`, and `foo3`, it's not
+possible for the compiler to know where the concrete type of `Foo` is going
+to come from:
 
-`bar` also fails under the current system because the if/else branches aren't
-guaranteed to be the same type. By creating the obligation that `bar::Return`
-be `&str`, `bar(true)` and `"hello!"` are known to be the same type within the
-body of `bar` and can be returned from the if/else branches.
+- `foo1` constrains `Foo` because it returns an `i32`, which it claims is equal
+to `Foo`.
+- `foo2` constraints `Foo`, because it sets the result of function `foo1`
+(which returns type `Foo`) to `i32. It then returns that `i32` value as `Foo`,
+again constraining `Foo` to the concrete type `i32`.
+- `foo3` places no constraints on `Foo` because it merely returns the result
+of `foo1`, which is already known to be `Foo`.
 
-Full list of obligations:
-1. `let x: MyImplTraitAlias = val_with_concrete type;` creates an obligation on
-`MyImplTraitAlias` to match the type of `val_with_concrete_type`. Note that
-this is why we can "see through" `impl Trait` in `let` bindings like
-`let x: impl Fn(i32) -> i32 = |x| x + 5;`.
-2. `let x: MyConcreteType = val_with_impl_trait_type;` creates an obligation on
-the `impl Trait` type of `val_with_impl_trait_type` to be equal to
-`MyConcreteType`.
-3. Same as 1 and 2, but with `static` and `const`.
-4. Returning `val_with_impl_trait_type` as a concrete type.
-5. Returning `val_with_concrete_type` as an `impl Trait` type.
+Note that, in order for `foo2` to add `5` to the result of `foo1`, the concrete
+type of the result had to be specified. This is because `foo2` cannot infer
+the concrete type of `Foo` from other functions in the module. This is done
+to prevent the reordering or manipulation of one function from having strange
+effects on the typechecking of another function, possibly hidden somewhere far
+away in the same module.
 
-Other usages of a variable, such as passing it to a function, calling a method,
-or accessing a field do _not_ create obligations.
-
-In any of the above obligations, a more specific `impl Trait` type can be
-substituted for a concrete type, and that will still create a new obligation.
-For example:
+Note that a function can place constraints upon a type other than plain
+equality:
 
 ```rust
 type Foo = impl Debug;
 
-fn foo() -> Foo {
-    0i32
+fn foo1() -> Foo {
+    vec![1i32] // Constrains `Foo == Vec<i32>`
 }
 
-fn foo_times_two(x: Foo) -> Foo {
-    // Creates an obligation `Foo: Add<Output=Foo> + Copy`
-    let x: impl Add<Output=Foo> + Copy = x;
-    x + x
+fn foo2(&mut x: Foo) {
+    let x: Vec<_> = x; // Constrains `Foo == Vec<T>` for some unknown `T`
+
+    // Removes the first element of `x`.
+    // This doesn't require knowing the type `T` in `Vec<T>`, so we're able
+    // to call this function without knowing the full type of `x`.
+    x.remove(0);
 }
 ```
 
-## Ascription of `impl Trait` Types
+In the above example, `foo1` fully constrains `Foo` to `Vec<i32>`, but `foo2`
+only partially constrains `Foo` by setting equal to `Vec<_>`. This enables
+the use of `Vec<_>` functions, but it isn't enough to infer the full type
+of `Foo`.
 
-Ascription of `impl Trait` types is really just one case of the
-"obligations" logic used above. The key thing to note here is that, within
-the same module as the `impl Trait` type is declared,
-`let _: MyType = my_impl_trait_val;` can be used to create an obligation on
-the concrete type of `my_impl_trait_val`, allowing it to be used more
-permissively.
+Outside of the module, `impl Trait` alias types behave the same way as
+other `impl Trait` types, except that it can be assumed that two values with
+the same `impl Trait` alias type are actually values of the same type:
 
-# How We Teach This
-[how-we-teach-this]: #how-we-teach-this
+```rust
+mod my_mod {
+    pub type Foo = impl Debug;
+    pub fn foo() -> Foo {
+        5i32
+    }
+    pub fn bar() -> Foo {
+        10i32
+    }
+    pub fn baz(x: Foo) -> Foo {
+        let x: i32 = x;
+        x + 5
+    }
+}
 
-`impl Trait` in `let`, `const`, `static`s and type aliases should feel like
-straightforward and natural extensions of the language, and should be
-introduced alongside `impl Trait`.
-
-`impl Trait` ascription and the obligations features should be considered
-advanced features, and are designed to make `impl Trait` "just work" in
-most of the ways you'd naturally want to use it.
-A full explanation of the obligations system should be reserved for
-advanced documentation. The full explanation would likely resemble the
-"detailed design" section of this RFC, rewritten to simplify the language
-and omit compiler implementation concerns such as the desire to avoid
-module-level inference.
-
-# Drawbacks
-[drawbacks]: #drawbacks
-
-This feature significantly expands the number of locations in which `impl Trait`
-can be used. While primarily an upside, this also means that newcomers to Rust
-will be exposed to the feature early on, potentially increasing the complexity
-of the onboarding experience.
-
-This proposal also introduces a whole new concept of "obligations" which can be
-challenging to reason about precisely.
+fn outside_mod() -> Foo {
+    if true {
+        my_mod::foo()
+    } else {
+        my_mod::baz(my_mod::bar())
+    }
+}
+```
 
 # Alternatives
 [alternatives]: #alternatives
