@@ -158,25 +158,47 @@ let displayable: impl Display = "Hello, world!";
 println!("{}", displayable);
 ```
 
-Declaring a variable of type `impl Trait` will hide its concrete type.
-The value will only be usable as something that implements the trait.
+Declaring a variable of type `impl Trait` will hide its concrete type
+from other modules. The concrete type will only be visible within
+the module in which the declaration occurred.
 In our example above, this means that, while we can "display" the
-value of `displayable`, the concrete type `&str` is hidden from
-us:
+value of `displayable`, the concrete type `&str` is hidden to
+other modules:
 
 ```rust
 use std::fmt::Display;
 
 // Without `impl Trait`:
-let displayable = "Hello, world!";
-println!("{}", displayable);
-assert_eq!(displayable.len(), 5); 
+mod my_mod {
+    pub const DISPLAYABLE: &str = "Hello, world!";
+    fn in_mod() {
+        println!("{}", DISPLAYABLE);
+        assert_eq!(DISPLAYABLE.len(), 5);
+    }
+}
+
+fn outside_mod() {
+    println!("{}", my_mod::DISPLAYABLE);
+    assert_eq!(my_mod::DISPLAYABLE.len(), 5);
+}
 
 // With `impl Trait`:
-let displayable: impl Display = "Hello, world!";
-let displayable = "Hello, world!";
-println!("{}", displayable);
-assert_eq!(displayable.len(), 5); // ERROR: no method `len` on `impl Display`
+mod my_mod {
+    pub const DISPLAYABLE: impl Display = "Hello, world!";
+    fn in_mod() {
+        // Inside the module, the concrete type of DISPLAYABLE is visible
+        println!("{}", DISPLAYABLE);
+        assert_eq!(DISPLAYABLE.len(), 5);
+    }
+}
+
+fn outside_mod() {
+    // Outside the my_mod, we only know `DISPLAYABLE` implements `Display`.
+    println!("{}", my_mod::DISPLAYABLE);
+
+    // ERROR: no method `len` on `impl Display`
+    assert_eq!(my_mod::DISPLAYABLE.len(), 5);
+}
 ```
 
 This is useful for declaring a value which implements a trait,
