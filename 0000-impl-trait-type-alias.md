@@ -61,7 +61,10 @@ guarantee that two `impl Trait` types are the same:
 // `impl Trait` in traits:
 struct MyStruct;
 impl Iterator for MyStruct {
-    // Here we can declare an associated type whose concrete type is hidden.
+
+    // Here we can declare an associated type whose concrete type is hidden
+    // to other modules.
+    //
     // External users only know that `Item` implements the `Debug` trait.
     type Item = impl Debug;
 
@@ -69,26 +72,31 @@ impl Iterator for MyStruct {
         Some("hello")
     }
 }
+```
 
-// `impl Trait` type aliases allow us to declare multiple items which refer to
-// the same `impl Trait` type:
+`impl Trait` type aliases allow us to declare multiple items which refer to
+the same `impl Trait` type:
 
-// Type `Foo` refers to a type which is hidden, and which is only known to to
-// implement the `Debug` trait.
-type Foo: impl Debug;
+```rust
+// Type `Foo` refers to a type that implements the `Debug` trait.
+// The concrete type to which `Foo` refers is inferred from this module,
+// and this concrete type is hidden from outer modules (but not submodules).
+pub type Foo: impl Debug;
 
 const FOO: Foo = 5;
 
-fn foo1() -> Foo {
+// This function can be used by outer modules to manufacture an instance of
+// `Foo`. Other modules don't know the concrete type of `Foo`,
+// so they can't make their own `Foo`s.
+pub fn get_foo() -> Foo {
     5
 }
 
-fn foo2() -> Foo {
-    10
-}
-
-fn opt_foo() -> Option<Foo> {
-    Some(foo1())
+// We know that the argument and return value of `get_larger_foo` must be the
+// same type as is returned from `get_foo`.
+pub fn get_larger_foo(x: Foo) -> Foo {
+    let x: i32 = x;
+    x + 10
 }
 
 // Since we know that all `Foo`s have the same (hidden) concrete type, we can
@@ -112,8 +120,17 @@ Separately, this RFC adds the ability to store an `impl Trait` type in a
 This makes `const` and `static` declarations more concise,
 and makes it possible to store types such as closures or iterator combinators
 in `const`s and `static`s.
-Writing out the full type of `const`s and `static`s has already been mentioned
-as a pain point in the [`const`/`static` type annotation elison RFC][2010].
+
+In a future world where `const fn` has been expanded to trait functions,
+one could imagine iterator constants such as this:
+
+```rust
+const THREES: impl Iterator<Item = i32> = (0..).map(|x| x * 3);
+```
+
+Since the type of `THREES` contains a closure, it is impossible to write down.
+The [`const`/`static` type annotation elison RFC][2010] has suggested one
+possible solution.
 That RFC proposes to let users omit the types of `const`s and `statics`s.
 However, in some cases, completely omitting the types of `const` and `static`
 items could make it harder to tell what sort of value is being stored in a
@@ -196,7 +213,8 @@ fn foo() -> Foo {
 synonyms for a type.
 In the example above, `Foo` is a synonym for `i32`.
 The difference between `impl Trait` type aliases and regular type aliases is
-that `impl Trait` type aliases hide their concrete type from other modules.
+that `impl Trait` type aliases hide their concrete type from other modules
+(but not submodules).
 Only the `impl Trait` signature is exposed:
 
 ```rust
@@ -230,10 +248,9 @@ This makes it possible to write modules that hide their concrete types from the
 outside world, allowing them to change implementation details without affecting
 consumers of their API.
 
-Note that it is often necessary to manually specify the concrete type of an
-`impl Trait`-aliased value, like in `let x: i32 = foo();` above. This allows
-the concrete type of `x` to become visible, so that `x` can be used as an
-`i32` rather than just an `impl Debug`.
+Note that it is sometimes necessary to manually specify the concrete type of an
+`impl Trait`-aliased value, like in `let x: i32 = foo();` above.
+This aids the function's ability to locally infer the concrete type of `Foo`.
 
 One particularly noteworthy use of `impl Trait` type aliases is in trait
 implementations.
@@ -262,6 +279,35 @@ impl Iterator for MyType {
     type Item = impl Fn(i32) -> i32;
     fn next(&mut self) -> Option<Self::Item> {
         Some(|x| x + 5)
+    }
+}
+```
+
+`impl Trait` aliases can also be used to reference unnameable types in a struct
+definition:
+
+```rust
+type Foo = impl Debug;
+fn foo() -> Foo { 5i32 }
+
+struct ContainsFoo {
+    some_foo: Foo
+}
+```
+
+It's also possible to write generic `impl Trait` aliases:
+
+```rust
+#[derive(Debug)]
+struct MyStruct<T: Debug> {
+    inner: T
+};
+
+type Foo<T> -> impl Debug;
+
+fn get_foo<T: Debug>(x: T) -> Foo<T> {
+    MyStruct {
+        inner: x
     }
 }
 ```
@@ -392,6 +438,52 @@ fn outside_mod() -> Foo {
 }
 ```
 
+One last difference between `impl Trait` aliases and normal type aliases is
+that `impl Trait` aliases cannot be used in `impl` blocks:
+
+```rust
+type Foo = impl Debug;
+impl Foo { // ERROR: `impl` cannot be used on `impl Trait` aliases
+    ...
+}
+impl MyTrait for Foo { // ERROR ^
+    ...
+}
+```
+
+While this feature may be added at some point in the future, it's unclear
+exactly what behavior it should have-- should it result in implementations
+of functions and traits on the underlying type? It seems like the answer
+should be "no" since doing so would give away the underlying type being
+hidden beneath the impl. Still, some version of this feature could be
+used eventually to implement traits or functions for closures, or
+to express conditional bounds in `impl Trait` signatures
+(e.g. `type Foo<T> = impl Debug; impl<T: Clone> Clone for Foo<T> { ... }`).
+This is a complicated design space which has not yet been explored fully
+enough. In the future, such a feature could be added backwards-compatibly.
+
+# Drawbacks
+[drawbacks]: #drawbacks
+
+This RFC proposes the addition of a complicated feature that will take time
+for Rust developers to learn and understand.
+There are potentially simpler ways to acheive some of the goals of this RFC,
+such as making `impl Trait` usable in traits.
+This RFC instead introduces a more complicated solution in order to
+allow for increased expressiveness and clarity.
+
+This RFC makes `impl Trait` feel even more like a type by allowing it in more
+locations where formerly only concrete types were allowed.
+However, there are other places such a type can appear where `impl Trait`
+cannot, such as `impl` blocks and `struct` definitions
+(i.e. `struct Foo { x: impl Trait }`).
+This inconsistency may be surprising to users.
+
+Additionally, if Rust ever moves to a bare `Trait` (no `impl`) syntax,
+`type Foo = impl Trait;` would likely require a new syntax, as
+`type Foo = MyType;` and `type Foo = Trait;` have different-enough
+behavior that the syntactic similarity would cause confusion.
+
 # Alternatives
 [alternatives]: #alternatives
 
@@ -400,6 +492,12 @@ such as specifically extending `impl Trait` to work in traits without
 allowing full "`impl Trait` type alias".
 A draft RFC for such a proposal can be seen
 [here](https://github.com/cramertj/impl-trait-goals/blob/impl-trait-in-traits/0000-impl-trait-in-traits.md).
+Any such feature could, in the future, be added as essentially syntax sugar on
+top of this RFC, which is strictly more expressive.
+The current RFC will also help us to gain experience with how people use
+`impl Trait` in practice, allowing us to resolve some remaining questions
+in the linked draft, specifically around how `impl Trait` associated types
+are used.
 
 # Unresolved questions
 [unresolved]: #unresolved-questions
@@ -412,3 +510,6 @@ have functions whose return types implement traits conditional on the input,
 e.g. `fn foo<T>(x: T) -> impl Clone if T: Clone`.
 - Associated-type-less `impl Trait` in trait declarations and implementations,
 such as the proposal mentioned in the alternatives section.
+As mentioned above, this feature would be strictly less expressive than this
+RFC. The more general feature proposed in this RFC would help us to define a
+better version of this alternative which could be added in the future.
